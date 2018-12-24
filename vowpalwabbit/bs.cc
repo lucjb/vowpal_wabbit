@@ -151,6 +151,26 @@ void print_result(int f, float res, v_array<char> tag, float lb, float ub)
   }
 }
 
+void print_result(int f, bs& d)
+{
+if (f >= 0)
+{
+	std::stringstream ss;
+	for (double v : *d.pred_vec)
+   	{
+		char temp[30];
+		sprintf(temp, "%f", v);
+    		ss << temp;
+    		ss << ' ';
+	}
+    	ss << '\n';
+    	ssize_t len = ss.str().size();
+	ssize_t t = io_buf::write_file_or_socket(f, ss.str().c_str(), (unsigned int)len);
+	if (t != len)
+		cerr << "write error: " << strerror(errno) << endl;
+  }
+}
+
 void output_example(vw& all, bs& d, example& ec)
 {
   label_data& ld = ec.l.simple;
@@ -173,7 +193,8 @@ void output_example(vw& all, bs& d, example& ec)
   }
 
   for (int sink : all.final_prediction_sink)
-    print_result(sink, ec.pred.scalar, ec.tag, d.lb, d.ub);
+    //print_result(sink, ec.pred.scalar, ec.tag, d.lb, d.ub);
+    print_result(sink, d);
 
   print_update(all, ec);
 }
