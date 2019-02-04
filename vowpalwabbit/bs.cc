@@ -151,21 +151,37 @@ void print_result(int f, float res, v_array<char> tag, float lb, float ub)
   }
 }
 
-void print_result(int f, bs& d)
+void print_result(int f, bs& d, float res, v_array<char> tag, float lb, float ub, float variance)
 {
 if (f >= 0)
 {
 	std::stringstream ss;
+        char temp[30];
+        sprintf(temp, "%f", res);
+        ss << temp;
+        print_tag(ss, tag);
+        ss << ' ';
+        sprintf(temp, "%f", lb);
+        ss << temp;
+        ss << ' ';
+        sprintf(temp, "%f", ub);
+        ss << temp;
+        ss << ' ';
+        sprintf(temp, "%f", variance);
+        ss << temp;
+        ss << '\n';
+/*
 	for (double v : *d.pred_vec)
    	{
-		char temp[30];
 		sprintf(temp, "%f", v);
     		ss << temp;
     		ss << ' ';
 	}
     	ss << '\n';
-    	ssize_t len = ss.str().size();
-	ssize_t t = io_buf::write_file_or_socket(f, ss.str().c_str(), (unsigned int)len);
+*/
+	std::string ss_str = ss.str();  
+    	ssize_t len = ss_str.size();
+	ssize_t t = io_buf::write_file_or_socket(f, ss_str.c_str(), (unsigned int)len);
 	if (t != len)
 		cerr << "write error: " << strerror(errno) << endl;
   }
@@ -179,8 +195,11 @@ void output_example(vw& all, bs& d, example& ec)
   if (ld.label != FLT_MAX && !ec.test_only)
     all.sd->weighted_labels += ((double)ld.label) * ec.weight;
 
+  float variance = 0; 
   if(all.final_prediction_sink.size() != 0)//get confidence interval only when printing out predictions
   {
+    float mean = ec.pred.scalar;
+
     d.lb = FLT_MAX;
     d.ub = -FLT_MAX;
     for (double v : *d.pred_vec)
@@ -189,12 +208,13 @@ void output_example(vw& all, bs& d, example& ec)
         d.ub = (float)v;
       if(v < d.lb)
         d.lb = (float)v;
+
+      variance += pow(v-mean, 2)/(d.B-1);
     }
   }
 
   for (int sink : all.final_prediction_sink)
-    //print_result(sink, ec.pred.scalar, ec.tag, d.lb, d.ub);
-    print_result(sink, d);
+    print_result(sink, d, ec.pred.scalar, ec.tag, d.lb, d.ub, variance);
 
   print_update(all, ec);
 }
