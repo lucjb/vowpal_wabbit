@@ -27,13 +27,18 @@ struct bs
   float ub;
   vector<double>* pred_vec;
   vw* all; // for raw prediction and loss
+  bool is_link_logistic;
 };
 
-void bs_predict_mean(vw& all, example& ec, vector<double> &pred_vec)
+void bs_predict_mean(vw& all, example& ec, vector<double> &pred_vec, bool is_link_logistic)
 {
   ec.pred.scalar = (float)accumulate(pred_vec.cbegin(), pred_vec.cend(), 0.0)/pred_vec.size();
-  if (ec.weight > 0 && ec.l.simple.label != FLT_MAX)
-    ec.loss = all.loss->getLoss(all.sd, ec.pred.scalar, ec.l.simple.label) * ec.weight;
+  if (ec.weight > 0 && ec.l.simple.label != FLT_MAX){
+     if (is_link_logistic)
+         ec.loss = all.loss->getLoss(all.sd, log(ec.pred.scalar) - log(1-ec.pred.scalar), ec.l.simple.label) * ec.weight;
+     else
+         ec.loss = all.loss->getLoss(all.sd, ec.pred.scalar, ec.l.simple.label) * ec.weight;
+  }
 }
 
 void bs_predict_vote(example& ec, vector<double> &pred_vec)
@@ -253,7 +258,7 @@ void predict_or_learn(bs& d, single_learner& base, example& ec)
   switch(d.bs_type)
   {
   case BS_TYPE_MEAN:
-    bs_predict_mean(all, ec, *d.pred_vec);
+    bs_predict_mean(all, ec, *d.pred_vec, d.is_link_logistic);
     break;
   case BS_TYPE_VOTE:
     bs_predict_vote(ec, *d.pred_vec);
@@ -277,12 +282,14 @@ void finish(bs& d)
 
 base_learner* bs_setup(arguments& arg)
 {
+
   auto data = scoped_calloc_or_throw<bs>();
   std::string type_string("mean");
   if (arg.new_options("Bootstrap")
       .critical("bootstrap", data->B, "k-way bootstrap by online importance resampling")
       .keep("bs_type", type_string, "prediction type {mean,vote}").missing())
     return nullptr;
+
 
   data->ub = FLT_MAX;
   data->lb = -FLT_MAX;
@@ -306,10 +313,19 @@ base_learner* bs_setup(arguments& arg)
   data->pred_vec->reserve(data->B);
   data->all = arg.all;
 
-  learner<bs,example>& l = init_learner(data, as_singleline(setup_base(arg)), predict_or_learn<true>,
+  auto base = as_singleline(setup_base(arg));
+
+  data->is_link_logistic = false;
+  if (arg.vm["link"].as<string>().compare("logistic") == 0)
+      data->is_link_logistic = true;
+
+
+  learner<bs,example>& l = init_learner(data, base, predict_or_learn<true>,
                                 predict_or_learn<false>, data->B);
   l.set_finish_example(finish_example);
   l.set_finish(finish);
+
+
 
   return make_base(l);
 }
