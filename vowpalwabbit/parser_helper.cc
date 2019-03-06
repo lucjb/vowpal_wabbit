@@ -150,7 +150,7 @@ po::variables_map arguments::add_options_skip_duplicates(po::options_description
                   else
                     THROW("Unsupported type for option '" << duplicate_option->first << "'");
 
-                  if (found_disagreement)
+                  if (0)
                     {
                       // get the original string value
                       auto duplicate_option = parsed_dup.options.begin();
