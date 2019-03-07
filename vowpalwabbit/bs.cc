@@ -27,14 +27,19 @@ struct bs
   float lb;
   float ub;
   vector<double>* pred_vec;
+  bool is_link_logistic;
   vw* all;  // for raw prediction and loss
 };
 
-void bs_predict_mean(vw& all, example& ec, vector<double>& pred_vec)
+void bs_predict_mean(vw& all, example& ec, vector<double> &pred_vec, bool is_link_logistic)
 {
   ec.pred.scalar = (float)accumulate(pred_vec.cbegin(), pred_vec.cend(), 0.0) / pred_vec.size();
-  if (ec.weight > 0 && ec.l.simple.label != FLT_MAX)
-    ec.loss = all.loss->getLoss(all.sd, ec.pred.scalar, ec.l.simple.label) * ec.weight;
+  if (ec.weight > 0 && ec.l.simple.label != FLT_MAX){
+     if (is_link_logistic)
+         ec.loss = all.loss->getLoss(all.sd, log(ec.pred.scalar) - log(1-ec.pred.scalar), ec.l.simple.label) * ec.weight;
+     else
+         ec.loss = all.loss->getLoss(all.sd, ec.pred.scalar, ec.l.simple.label) * ec.weight;
+  }
 }
 
 void bs_predict_vote(example& ec, vector<double>& pred_vec)
@@ -130,7 +135,8 @@ void bs_predict_vote(example& ec, vector<double>& pred_vec)
   ec.loss = ((ec.pred.scalar == ec.l.simple.label) ? 0.f : 1.f) * ec.weight;
 }
 
-void print_result(int f, float res, v_array<char> tag, float lb, float ub)
+
+void print_result(int f, float res, v_array<char> tag, float lb, float ub, float var)
 {
   if (f >= 0)
   {
@@ -144,6 +150,9 @@ void print_result(int f, float res, v_array<char> tag, float lb, float ub)
     ss << temp;
     ss << ' ';
     sprintf(temp, "%f", ub);
+    ss << temp;
+    ss << ' ';
+    sprintf(temp, "%f", var);
     ss << temp;
     ss << '\n';
     ssize_t len = ss.str().size();
@@ -161,20 +170,23 @@ void output_example(vw& all, bs& d, example& ec)
   if (ld.label != FLT_MAX && !ec.test_only)
     all.sd->weighted_labels += ((double)ld.label) * ec.weight;
 
+  float variance = 0;
   if (all.final_prediction_sink.size() != 0)  // get confidence interval only when printing out predictions
   {
     d.lb = FLT_MAX;
     d.ub = -FLT_MAX;
+    float mean = ec.pred.scalar;
     for (double v : *d.pred_vec)
     {
       if (v > d.ub)
         d.ub = (float)v;
       if (v < d.lb)
         d.lb = (float)v;
+      variance += pow(v-mean, 2)/(d.B-1);
     }
   }
 
-  for (int sink : all.final_prediction_sink) print_result(sink, ec.pred.scalar, ec.tag, d.lb, d.ub);
+  for (int sink : all.final_prediction_sink) print_result(sink, ec.pred.scalar, ec.tag, d.lb, d.ub, variance);
 
   print_update(all, ec);
 }
@@ -214,7 +226,7 @@ void predict_or_learn(bs& d, single_learner& base, example& ec)
   switch (d.bs_type)
   {
     case BS_TYPE_MEAN:
-      bs_predict_mean(all, ec, *d.pred_vec);
+      bs_predict_mean(all, ec, *d.pred_vec, d.is_link_logistic);
       break;
     case BS_TYPE_VOTE:
       bs_predict_vote(ec, *d.pred_vec);
@@ -239,8 +251,10 @@ base_learner* bs_setup(options_i& options, vw& all)
 {
   auto data = scoped_calloc_or_throw<bs>();
   std::string type_string("mean");
+  std::string link("mean");
   option_group_definition new_options("Bootstrap");
   new_options.add(make_option("bootstrap", data->B).keep().help("k-way bootstrap by online importance resampling"))
+      .add(make_option("link", link))
       .add(make_option("bs_type", type_string).keep().help("prediction type {mean,vote}"));
   options.add_and_parse(new_options);
 
@@ -269,8 +283,18 @@ base_learner* bs_setup(options_i& options, vw& all)
   data->pred_vec->reserve(data->B);
   data->all = &all;
 
-  learner<bs, example>& l = init_learner(
-      data, as_singleline(setup_base(options, all)), predict_or_learn<true>, predict_or_learn<false>, data->B);
+  auto base = as_singleline(setup_base(options, all));
+
+  data->is_link_logistic = false;
+
+  if (options.was_supplied("link") && link.compare("logistic") == 0) {
+      data->is_link_logistic = true;
+  }
+
+   learner<bs,example>& l = init_learner(data, base, predict_or_learn<true>,
+                                         predict_or_learn<false>, data->B);
+
+
   l.set_finish_example(finish_example);
   l.set_finish(finish);
 
